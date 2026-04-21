@@ -1,0 +1,14 @@
+{
+    "project_type": [
+        "Fullstack Integrated management platform for pharmaceutical compliance and talent operations"
+    ],
+    "frontend_tech": [
+        "Angular"
+    ],
+    "backend_tech": [
+        "Go"
+    ],
+    "database": [
+        "SQL"
+    ]
+}

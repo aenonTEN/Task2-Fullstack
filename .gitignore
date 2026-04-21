@@ -1,0 +1,22 @@
+# Binaries
+backend/main
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Docker & OS
+.env
+repo/storage/
+mysql_data/
+.DS_Store
+
+# Frontend
+repo/frontend/node_modules/
+repo/frontend/dist/
+.angular/
+
+# Go
+go.sum
+vendor/
