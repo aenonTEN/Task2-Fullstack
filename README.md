@@ -35,8 +35,6 @@ An enterprise recruitment and case management system built with Angular frontend
 - Session invalidation on logout
 - AES-256-GCM encryption for sensitive data (phone, ID number) with configurable key via `AES_KEY_HEX`
 
-> **Security Note**: Default admin credentials are initialized via the Docker environment for evaluation. In production, these should be managed via a secure vault or environment variables.
-
 ### 2. Recruitment Module
 - **Candidates**: Create, list, search candidates
 - **Bulk Import**: Import candidates from JSON files
