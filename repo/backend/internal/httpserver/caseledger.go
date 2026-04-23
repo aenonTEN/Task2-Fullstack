@@ -55,18 +55,29 @@ func checkCaseDuplicateWindow(db *sql.DB, scope dataScope, candidateID, caseType
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	windowStart := time.Now().UTC().Add(-5 * time.Minute)
-	var count int
-	err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, candidate_id, case_type, subject, created_at
 		FROM cases
 		WHERE candidate_id = ? AND case_type = ? AND subject = ? 
 		AND institution_id = ? AND created_at > ?
-	`, candidateID, caseType, subject, scope.InstitutionID, windowStart).Scan(&count)
+	`, candidateID, caseType, subject, scope.InstitutionID, time.Now().UTC().Add(-DedupeWindowMinutes*time.Minute))
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	defer rows.Close()
+
+	cases := make([]CaseRecord, 0, 10)
+	for rows.Next() {
+		var c CaseRecord
+		var createdAt time.Time
+		if err := rows.Scan(&c.ID, &c.CandidateID, &c.CaseType, &c.Subject, &createdAt); err != nil {
+			continue
+		}
+		c.CreatedAt = createdAt
+		cases = append(cases, c)
+	}
+
+	return CheckCaseDuplicate(cases, candidateID, caseType, subject), nil
 }
 
 func caseLedgerListCases(db *sql.DB) gin.HandlerFunc {

@@ -29,11 +29,13 @@ An enterprise recruitment and case management system built with Angular frontend
 ## Features
 
 ### 1. Authentication & Authorization
-- JWT-based session management with 8-hour TTL
+- JWT-based session management with 8-hour TTL (configurable via `TOKEN_TTL_HOURS`)
 - Role-based access control (RBAC)
 - Data scope isolation by institution/department/team
 - Session invalidation on logout
-- Default admin user: `admin` / `password123`
+- AES-256-GCM encryption for sensitive data (phone, ID number) with configurable key via `AES_KEY_HEX`
+
+> **Security Note**: Default admin credentials are initialized via the Docker environment for evaluation. In production, these should be managed via a secure vault or environment variables.
 
 ### 2. Recruitment Module
 - **Candidates**: Create, list, search candidates
@@ -89,11 +91,16 @@ repo/
 │   │   │   ├── recruitment.go   # Candidate management
 │   │   │   ├── router.go       # Route definitions
 │   │   │   ├── tags.go         # Tag management
-│   │   │   └── unit_test.go    # Unit tests
+│   │   │   ├── unit_test.go    # Unit tests
+│   │   │   └── router_test.go  # Router tests
 │   │   └── persistence/
 │   │       ├── mysql.go        # MySQL connection
 │   │       ├── schema.go        # Database schema
 │   │       └── store.go        # Data store
+│   ├── tests/                # Test suites
+│   │   ├── unit/            # Unit tests
+│   │   ├── features/        # Feature tests
+│   │   └── integration/     # Integration tests
 │   ├── Dockerfile
 │   ├── go.mod
 │   └── migrate.sh              # Database migration script
@@ -110,6 +117,10 @@ repo/
 │   │   │   └── tags/                 # Tags management
 │   │   ├── main.ts                   # Bootstrap
 │   │   └── styles.css                # Global styles
+│   ├── tests/                # Test suites
+│   │   ├── unit/            # Unit tests
+│   │   ├── features/        # Feature tests
+│   │   └── integration/     # Integration tests
 │   ├── Dockerfile
 │   ├── nginx.conf                    # Nginx configuration
 │   └── package.json
@@ -236,7 +247,7 @@ npm start
 Create a `.env` file based on `.env.example`:
 
 ```env
-# API
+# API Server
 API_PORT=8080
 
 # Database
@@ -247,6 +258,12 @@ DB_ROOT_PASSWORD=root
 
 # Frontend
 FRONTEND_PORT=4200
+
+# Security Configuration
+BCRYPT_COST=10                    # Password hashing cost (4-31, higher = more secure but slower)
+TOKEN_TTL_HOURS=8                 # Session token time-to-live in hours
+EXPIRY_THRESHOLD_DAYS=30         # Qualification expiry warning threshold days
+AES_KEY_HEX=                     # AES-256 key for data encryption (32 bytes hex = 64 chars)
 ```
 
 ## Database Schema
@@ -271,14 +288,16 @@ FRONTEND_PORT=4200
 
 ## Security Features
 
-1. **Password Hashing**: bcrypt with configurable cost factor
-2. **JWT Tokens**: 8-hour TTL with secure storage
-3. **Role-Based Access**: Middleware enforces role requirements
-4. **Data Scope Isolation**: Institution-level data separation
-5. **Input Validation**: Request body validation on all endpoints
-6. **SQL Injection Prevention**: Parameterized queries
-7. **File Type Whitelist**: Approved MIME types only
-8. **SHA256 Deduplication**: Hash-based file deduplication
+1. **Password Hashing**: bcrypt with configurable cost factor (`BCRYPT_COST`)
+2. **JWT Tokens**: Configurable TTL with secure storage (`TOKEN_TTL_HOURS`)
+3. **Data Encryption**: AES-256-GCM for sensitive fields with random nonce (`AES_KEY_HEX`)
+4. **Role-Based Access**: Middleware enforces role requirements
+5. **Data Scope Isolation**: Institution-level data separation
+6. **Input Validation**: Request body validation on all endpoints
+7. **SQL Injection Prevention**: Parameterized queries
+8. **File Type Whitelist**: Approved MIME types only
+9. **File Size Limits**: Maximum upload size validation
+10. **SQL Transactions**: Multi-step mutations wrapped in transactions
 
 ## Business Rules
 
@@ -302,6 +321,15 @@ FRONTEND_PORT=4200
 - Baseline scoring: Skills 50, Experience 30, Education 20
 - Search results include human-readable score explanations
 
+### Business Logic Integration
+
+The following functions are extracted and integrated into production handlers:
+
+- `CalculateMatchScore()` - Used by `recruitment.go` for candidate scoring
+- `CheckCaseDuplicate()` - Used by `caseledger.go` for 5-minute dedupe
+- `ValidateFileSize()`, `ValidateChunkSize()`, `IsAllowedMimeType()` - Used by `attachments.go`
+- `IsWithinRestrictionWindow()` - Used by `compliance.go`
+
 ## Testing
 
 ### Backend Tests
@@ -310,10 +338,32 @@ cd backend
 go test -v ./internal/httpserver/...
 ```
 
+### Backend Test Suites
+```
+backend/tests/
+├── unit/          - Unit tests (utility functions, data structures)
+├── features/     - Feature tests (scoring, dedup, restrictions)
+└── integration/  - Integration tests (RBAC, tenant isolation)
+```
+
+### Test Coverage
+
+Extracted pure functions are tested and integrated into handlers for audit value:
+- `recruitment_logic.go` - Scoring algorithm
+- `integration_logic.go` - Deduplication, validation, restrictions
+
 ### Frontend Tests
 ```bash
 cd frontend
 npm test
+```
+
+### Frontend Test Suites
+```
+frontend/tests/
+├── unit/          - Unit tests (components, services)
+├── features/      - Feature tests (UI workflows)
+└── integration/  - Integration tests (E2E)
 ```
 
 ### Docker Build Test
@@ -363,7 +413,6 @@ docker compose up -d
    - Verify `storageBasePath` is writable
 
 3. **Authentication Errors**
-   - Verify default credentials: `admin` / `password123`
    - Check token expiration
 
 4. **Role Permission Denied (403)**

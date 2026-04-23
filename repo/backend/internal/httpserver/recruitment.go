@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -15,24 +18,53 @@ import (
 	"github.com/google/uuid"
 )
 
-var secretKey = []byte("eaglepoint-secret-key-32-bytes!!")
-var fixedNonce = []byte("123456789012")
+func getAESKey() []byte {
+	keyHex := os.Getenv("AES_KEY_HEX")
+	if keyHex == "" {
+		key := make([]byte, 32)
+		rand.Read(key)
+		return key
+	}
+	key, err := hex.DecodeString(keyHex)
+	if err != nil || len(key) != 32 {
+		key := make([]byte, 32)
+		rand.Read(key)
+		return key
+	}
+	return key
+}
 
 func encryptData(text string) string {
-	if text == "" { return "" }
-	c, _ := aes.NewCipher(secretKey)
+	if text == "" {
+		return ""
+	}
+	key := getAESKey()
+	c, _ := aes.NewCipher(key)
 	gcm, _ := cipher.NewGCM(c)
-	return base64.StdEncoding.EncodeToString(gcm.Seal(nil, fixedNonce, []byte(text), nil))
+	nonce := make([]byte, 12)
+	rand.Read(nonce)
+	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(text), nil))
 }
 
 func decryptData(cryptoText string) string {
-	if cryptoText == "" { return "" }
+	if cryptoText == "" {
+		return ""
+	}
 	data, err := base64.StdEncoding.DecodeString(cryptoText)
-	if err != nil { return cryptoText }
-	c, _ := aes.NewCipher(secretKey)
+	if err != nil {
+		return cryptoText
+	}
+	key := getAESKey()
+	c, _ := aes.NewCipher(key)
 	gcm, _ := cipher.NewGCM(c)
-	plaintext, err := gcm.Open(nil, fixedNonce, data, nil)
-	if err != nil { return cryptoText }
+	nonceSize := 12
+	if len(data) < nonceSize {
+		return cryptoText
+	}
+	plaintext, err := gcm.Open(nil, data[:nonceSize], data[nonceSize:], nil)
+	if err != nil {
+		return cryptoText
+	}
 	return string(plaintext)
 }
 
@@ -121,12 +153,19 @@ func recruitmentCreateCandidate(db *sql.DB, store auditWriter) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 		defer cancel()
 
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, errorResponse{Code: "internal_error", Message: "Failed to start transaction.", TraceID: c.GetString("traceId")})
+			return
+		}
+		defer tx.Rollback()
+
 		duplicateFound := false
 		mergeCandidateID := ""
 		mergeConflicts := make([]string, 0)
 
 		if phone != "" {
-			err := db.QueryRowContext(ctx, `
+			err := tx.QueryRowContext(ctx, `
 				SELECT id FROM candidates
 				WHERE institution_id = ? AND phone = ? AND deleted_at IS NULL
 				LIMIT 1
@@ -138,7 +177,7 @@ func recruitmentCreateCandidate(db *sql.DB, store auditWriter) gin.HandlerFunc {
 		}
 
 		if !duplicateFound && idNumber != "" {
-			err := db.QueryRowContext(ctx, `
+			err := tx.QueryRowContext(ctx, `
 				SELECT id FROM candidates
 				WHERE institution_id = ? AND id_number = ? AND deleted_at IS NULL
 				LIMIT 1
@@ -151,12 +190,14 @@ func recruitmentCreateCandidate(db *sql.DB, store auditWriter) gin.HandlerFunc {
 
 		if duplicateFound {
 			var existingSkillsJSON string
-			err := db.QueryRowContext(ctx, "SELECT skills_json FROM candidates WHERE id = ?", mergeCandidateID).Scan(&existingSkillsJSON)
+			err := tx.QueryRowContext(ctx, "SELECT skills_json FROM candidates WHERE id = ?", mergeCandidateID).Scan(&existingSkillsJSON)
 			if err == nil {
 				var existingSkills []string
 				_ = json.Unmarshal([]byte(existingSkillsJSON), &existingSkills)
 				skillSet := make(map[string]bool)
-				for _, s := range existingSkills { skillSet[s] = true }
+				for _, s := range existingSkills {
+					skillSet[s] = true
+				}
 				for _, s := range req.Skills {
 					if !skillSet[s] {
 						existingSkills = append(existingSkills, s)
@@ -164,22 +205,27 @@ func recruitmentCreateCandidate(db *sql.DB, store auditWriter) gin.HandlerFunc {
 					}
 				}
 				newSkillsJSON, _ := json.Marshal(existingSkills)
-				_, _ = db.ExecContext(ctx, `
+				_, _ = tx.ExecContext(ctx, `
 					UPDATE candidates SET education = ?, experience_years = ?, skills_json = ?, updated_at = ?
 					WHERE id = ?
 				`, strings.TrimSpace(req.Education), req.ExperienceYears, string(newSkillsJSON), time.Now().UTC(), mergeCandidateID)
-				
+
 				auditRec := auditRecord{
-					ID:       uuid.NewString(),
-					TraceID:  c.GetString("traceId"),
-					ActorID:  c.GetString("userId"),
-					Action:   "MERGE_UPDATE",
-					Entity:   "Candidate",
-					EntityID: mergeCandidateID,
-					After:    gin.H{"mergedFields": mergeConflicts},
+					ID:        uuid.NewString(),
+					TraceID:   c.GetString("traceId"),
+					ActorID:   c.GetString("userId"),
+					Action:    "MERGE_UPDATE",
+					Entity:    "Candidate",
+					EntityID:  mergeCandidateID,
+					After:     gin.H{"mergedFields": mergeConflicts},
 					CreatedAt: time.Now().UTC().Format(time.RFC3339),
 				}
 				_ = store.AppendAudit(auditRec)
+			}
+
+			if err := tx.Commit(); err != nil {
+				c.JSON(http.StatusInternalServerError, errorResponse{Code: "internal_error", Message: "Failed to commit transaction.", TraceID: c.GetString("traceId")})
+				return
 			}
 
 			result := candidateMergeResult{
@@ -196,12 +242,17 @@ func recruitmentCreateCandidate(db *sql.DB, store auditWriter) gin.HandlerFunc {
 		id := uuid.NewString()
 		now := time.Now().UTC()
 
-		_, err := db.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO candidates (id, institution_id, name, phone, phone_masked, id_number, education, experience_years, skills_json, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, id, scope.InstitutionID, req.Name, encryptedPhone, maskPhone(phone), encryptedID, strings.TrimSpace(req.Education), req.ExperienceYears, string(skillsJSON), now, now)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, errorResponse{Code: "internal_error", Message: "Failed to create candidate.", TraceID: c.GetString("traceId")})
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			c.JSON(http.StatusInternalServerError, errorResponse{Code: "internal_error", Message: "Failed to commit transaction.", TraceID: c.GetString("traceId")})
 			return
 		}
 
@@ -322,41 +373,7 @@ func recruitmentSearch(db *sql.DB) gin.HandlerFunc {
 			var skills []string
 			_ = json.Unmarshal([]byte(skillsRaw), &skills)
 
-			score := 0
-			reasons := make([]string, 0, 4)
-
-			// Skills: full 50 if requested skill present.
-			if skill != "" {
-				found := false
-				for _, s := range skills {
-					if strings.ToLower(strings.TrimSpace(s)) == skill {
-						found = true
-						break
-					}
-				}
-				if found {
-					score += 50
-					reasons = append(reasons, "Requested skill matched (+50)")
-				} else {
-					reasons = append(reasons, "Requested skill not matched (+0)")
-				}
-			}
-
-			// Experience: scaffold assumes >= 3 years earns full 30.
-			if exp >= 3 {
-				score += 30
-				reasons = append(reasons, "Experience threshold met (+30)")
-			} else {
-				reasons = append(reasons, "Experience below threshold (+0)")
-			}
-
-			// Education: full 20 if matches query.
-			if education != "" && strings.Contains(strings.ToLower(edu), education) {
-				score += 20
-				reasons = append(reasons, "Education requirement matched (+20)")
-			} else if education != "" {
-				reasons = append(reasons, "Education requirement not matched (+0)")
-			}
+			score, reasons := CalculateMatchScore(exp, edu, skills, skill, education)
 
 			results = append(results, matchResult{
 				CandidateID: id,

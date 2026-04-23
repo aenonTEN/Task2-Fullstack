@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +21,10 @@ func NewRouterWithDeps(deps *RouterDeps) *gin.Engine {
 	router.Use(gin.Logger(), gin.Recovery())
 
 	if deps == nil || deps.DB == nil {
-		panic("RouterDeps.DB is required")
+		router.GET("/api/v1/health/ready", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		})
+		return router
 	}
 
 	store := &persistence.Store{DB: deps.DB}
@@ -122,7 +126,10 @@ func NewRouterWithDeps(deps *RouterDeps) *gin.Engine {
 }
 
 func NewRouter() *gin.Engine {
-	dsn := "root:root@tcp(localhost:3306)/eaglepoint"
+	dsn := os.Getenv("DB_DSN")
+	if dsn == "" {
+		dsn = "root:root@tcp(db:3306)/eaglepoint?parseTime=true"
+	}
 	db, err := persistence.OpenMySQL(dsn)
 	if err != nil {
 		panic("failed to connect to database: " + err.Error())

@@ -7,15 +7,14 @@ import { ApiService } from "./api.service";
 @Component({
   selector: "app-root",
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    RouterModule
-  ],
+  imports: [CommonModule, FormsModule, RouterModule],
   template: `
     <main class="container">
       <header class="header">
-        <h1>Integrated Platform</h1>
+        <div class="header-content">
+          <h1>Integrated Platform</h1>
+          <span class="app-subtitle">Enterprise Recruitment Management</span>
+        </div>
         <div class="meta">
           <span class="pill" [class.ok]="status === 'authenticated'" [class.bad]="status === 'error'">
             {{ status }}
@@ -23,35 +22,52 @@ import { ApiService } from "./api.service";
         </div>
       </header>
 
-      <section *ngIf="status !== 'authenticated'" class="glass-panel">
-        <h2>Login</h2>
-        <div class="grid">
-          <label>
-            <span>Username</span>
-            <input [(ngModel)]="username" autocomplete="username" />
-          </label>
-          <label>
-            <span>Password</span>
-            <input [(ngModel)]="password" type="password" autocomplete="current-password" />
-          </label>
+      <section *ngIf="status !== 'authenticated'" class="login-section">
+        <div class="glass-panel login-panel">
+          <div class="login-header">
+            <h2>Sign In</h2>
+            <p>Enter your credentials to access the platform</p>
+          </div>
+          <div class="grid">
+            <label>
+              <span>Username</span>
+              <input [(ngModel)]="username" autocomplete="username" placeholder="Enter your username" />
+            </label>
+            <label>
+              <span>Password</span>
+              <input [(ngModel)]="password" type="password" autocomplete="current-password" placeholder="Enter your password" />
+            </label>
+          </div>
+          <div *ngIf="message" class="error-message">{{ message }}</div>
+          <div class="row">
+            <button (click)="login()" [disabled]="busy" class="login-btn">
+              {{ busy ? 'Signing in...' : 'Sign In' }}
+            </button>
+          </div>
+          <p class="login-hint">Contact your administrator if you don't have credentials</p>
         </div>
-        <div class="row">
-          <button (click)="login()" [disabled]="busy">Sign in</button>
-          <span class="hint">Default scaffold user: <code>admin / password123</code></span>
-        </div>
-        <pre *ngIf="message" class="message">{{ message }}</pre>
       </section>
 
       <section *ngIf="status === 'authenticated'" class="glass-panel">
-        <h2>Session</h2>
-        <p><strong>Expires</strong>: <code>{{ expiresAt }}</code></p>
-        <div *ngIf="api.me" class="message">
-          <div><strong>User</strong>: <code>{{ api.me.userId }}</code></div>
-          <div><strong>Roles</strong>: <code>{{ api.me.roleIds.join(', ') }}</code></div>
-          <div><strong>Scope</strong>: <code>{{ api.me.scope | json }}</code></div>
+        <div class="session-header">
+          <h2>Session</h2>
+          <button class="btn-secondary btn-small" (click)="logout()" [disabled]="busy">Sign Out</button>
         </div>
-        <div class="row">
-          <button class="btn-secondary" (click)="logout()" [disabled]="busy">Logout</button>
+        <div class="session-info">
+          <div class="info-item">
+            <span class="info-label">Expires</span>
+            <span class="info-value">{{ expiresAt | date:'medium' }}</span>
+          </div>
+          <div *ngIf="api.me" class="info-item">
+            <span class="info-label">User</span>
+            <span class="info-value">{{ api.me.userId }}</span>
+          </div>
+          <div *ngIf="api.me" class="info-item">
+            <span class="info-label">Roles</span>
+            <div class="tag-list">
+              <span *ngFor="let role of api.me.roleIds" class="tag">{{ role }}</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -64,17 +80,33 @@ import { ApiService } from "./api.service";
       </nav>
 
       <router-outlet *ngIf="status === 'authenticated'"></router-outlet>
+
+      <div *ngIf="showConfirmDialog" class="confirm-overlay" (click)="cancelConfirm()">
+        <div class="confirm-dialog" (click)="$event.stopPropagation()">
+          <h3>{{ confirmTitle }}</h3>
+          <p>{{ confirmMessage }}</p>
+          <div class="confirm-actions">
+            <button class="btn-secondary" (click)="cancelConfirm()">Cancel</button>
+            <button class="btn-danger" (click)="confirmAction()">Confirm</button>
+          </div>
+        </div>
+      </div>
     </main>
   `
 })
 export class AppComponent implements OnInit {
-  username = "admin";
-  password = "password123";
+  username = "";
+  password = "";
 
   status: "anonymous" | "authenticated" | "error" = "anonymous";
   busy = false;
   message = "";
   expiresAt = "";
+
+  showConfirmDialog = false;
+  confirmTitle = "";
+  confirmMessage = "";
+  confirmCallback: (() => void) | null = null;
 
   constructor(public api: ApiService, private router: Router) { }
 
@@ -98,7 +130,7 @@ export class AppComponent implements OnInit {
       await this.loadMe();
     } catch (e: any) {
       this.status = "error";
-      this.message = JSON.stringify(e.error || e.message, null, 2);
+      this.message = e.error?.message || e.message || "Login failed";
     } finally {
       this.busy = false;
     }
@@ -128,5 +160,25 @@ export class AppComponent implements OnInit {
       this.busy = false;
       this.router.navigate(['/']);
     }
+  }
+
+  promptConfirm(title: string, message: string, callback: () => void) {
+    this.confirmTitle = title;
+    this.confirmMessage = message;
+    this.confirmCallback = callback;
+    this.showConfirmDialog = true;
+  }
+
+  confirmAction() {
+    if (this.confirmCallback) {
+      this.confirmCallback();
+    }
+    this.showConfirmDialog = false;
+    this.confirmCallback = null;
+  }
+
+  cancelConfirm() {
+    this.showConfirmDialog = false;
+    this.confirmCallback = null;
   }
 }

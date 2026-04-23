@@ -86,6 +86,7 @@ export class ApiService {
     const initRes = await firstValueFrom(this.http.post<any>("/api/v1/attachments/init", {
       caseId,
       fileName: file.name,
+      fileSize: file.size,
       mimeType: file.type || "application/octet-stream"
     }, { headers: this.getAuthHeaders() }));
 
@@ -97,11 +98,14 @@ export class ApiService {
       const start = i * chunkSize;
       const end = Math.min(start + chunkSize, file.size);
       const chunk = file.slice(start, end);
-      const formData = new FormData();
-      formData.append("chunk", chunk);
-      await firstValueFrom(this.http.post<any>(`/api/v1/attachments/${uploadId}/chunk`, formData, {
-        headers: { Authorization: `Bearer ${this.token}` }
-      }));
+      const buffer = await chunk.arrayBuffer();
+      const chunkArray = new Uint8Array(buffer);
+      const hexChunk = Array.from(chunkArray).map(b => b.toString(16).padStart(2, "0")).join("");
+      await firstValueFrom(this.http.post<any>(`/api/v1/attachments/${uploadId}/chunk`, {
+        uploadId,
+        chunkData: hexChunk,
+        chunkIndex: i
+      }, { headers: this.getAuthHeaders() }));
     }
 
     return firstValueFrom(this.http.post<any>("/api/v1/attachments/complete", {

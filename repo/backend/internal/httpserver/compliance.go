@@ -46,7 +46,7 @@ func checkQualificationExpiry(expiryDate string) (isActive bool) {
 	if err != nil {
 		return true
 	}
-	return time.Now().UTC().After(t)
+	return time.Now().UTC().Before(t)
 }
 
 func complianceListQualifications(db *sql.DB) gin.HandlerFunc {

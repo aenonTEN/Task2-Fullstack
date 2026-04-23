@@ -3,10 +3,21 @@ package persistence
 import (
 	"context"
 	"database/sql"
+	"os"
+	"strconv"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+func GetBcryptCost() int {
+	costStr := os.Getenv("BCRYPT_COST")
+	cost, err := strconv.Atoi(costStr)
+	if err != nil || cost < 4 || cost > 31 {
+		return bcrypt.DefaultCost
+	}
+	return cost
+}
 
 func EnsureSchema(ctx context.Context, db *sql.DB) error {
 	stmts := []string{
@@ -252,7 +263,7 @@ func EnsureSchema(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if count == 0 {
-		hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte("password123"), GetBcryptCost())
 		if err != nil {
 			return err
 		}

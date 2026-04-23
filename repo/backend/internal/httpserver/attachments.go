@@ -32,9 +32,9 @@ var allowedMimeTypes = map[string]bool{
 type attachmentUploadInitRequest struct {
 	CaseID      string `json:"caseId"`
 	FileName    string `json:"fileName"`
-	FileSize    int64  `json:"fileSize"`
+	FileSize    int64  `json:"fileSize,omitempty"`
 	MimeType    string `json:"mimeType"`
-	TotalChunks int    `json:"totalChunks"`
+	TotalChunks int    `json:"totalChunks,omitempty"`
 }
 
 type attachmentUploadInitResponse struct {
@@ -66,7 +66,8 @@ type attachmentItem struct {
 }
 
 const (
-	maxChunkSize    = 5 * 1024 * 1024 // 5MB per chunk
+	maxChunkSize    = 5 * 1024 * 1024  // 5MB per chunk
+	maxFileSize     = 50 * 1024 * 1024 // 50MB max file size
 	storageBasePath = "/app/storage"
 	dedupeWindow    = 5 * time.Minute
 )
@@ -87,6 +88,11 @@ func attachmentInitUpload(db *sql.DB) gin.HandlerFunc {
 
 		if req.FileName == "" || req.FileSize <= 0 {
 			c.JSON(http.StatusBadRequest, errorResponse{Code: "validation_error", Message: "FileName and FileSize are required.", TraceID: c.GetString("traceId")})
+			return
+		}
+
+		if req.FileSize > maxFileSize {
+			c.JSON(http.StatusBadRequest, errorResponse{Code: "validation_error", Message: fmt.Sprintf("File size exceeds maximum of %d MB.", maxFileSize/1024/1024), TraceID: c.GetString("traceId")})
 			return
 		}
 
@@ -151,6 +157,11 @@ func attachmentUploadChunk(db *sql.DB) gin.HandlerFunc {
 		chunkData, err := hex.DecodeString(req.ChunkData)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, errorResponse{Code: "validation_error", Message: "Invalid chunk data encoding.", TraceID: c.GetString("traceId")})
+			return
+		}
+
+		if len(chunkData) > maxChunkSize {
+			c.JSON(http.StatusBadRequest, errorResponse{Code: "validation_error", Message: fmt.Sprintf("Chunk size exceeds maximum of %d MB.", maxChunkSize/1024/1024), TraceID: c.GetString("traceId")})
 			return
 		}
 

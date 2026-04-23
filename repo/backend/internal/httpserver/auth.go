@@ -3,6 +3,8 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +14,19 @@ import (
 
 	"eaglepoint/backend/internal/persistence"
 )
+
+func getBcryptCost() int {
+	return persistence.GetBcryptCost()
+}
+
+func getTokenTTL() time.Duration {
+	ttlStr := os.Getenv("TOKEN_TTL_HOURS")
+	ttl, err := strconv.Atoi(ttlStr)
+	if err != nil || ttl <= 0 {
+		return 8 * time.Hour
+	}
+	return time.Duration(ttl) * time.Hour
+}
 
 type authHandler struct {
 	store *persistence.Store
@@ -91,7 +106,7 @@ func (h *authHandler) Login(c *gin.Context) {
 	}
 
 	token := uuid.NewString()
-	expiresAt := time.Now().UTC().Add(8 * time.Hour)
+	expiresAt := time.Now().UTC().Add(getTokenTTL())
 	if err := h.store.CreateSession(ctx, token, user.UserID, expiresAt); err != nil {
 		h.writeError(c, http.StatusInternalServerError, "internal_error", "Failed to create session.", nil)
 		return
@@ -154,4 +169,3 @@ func (h *authHandler) Logout(c *gin.Context) {
 
 	c.Status(http.StatusNoContent)
 }
-
