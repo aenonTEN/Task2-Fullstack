@@ -225,6 +225,16 @@ repo/
    - Frontend: http://localhost:4200
    - API: http://localhost:8080
    - Database: localhost:3306
+  
+### Default Evaluation Account
+The project includes a **pre-recorded administrator account** within the system's initialization logic. This account is automatically inserted into the database upon the first startup.
+
+*   **Username**: `admin`
+*   **Password**: `password123`
+
+> [!WARNING]  
+> This account is hardcoded in the `backend/internal/persistence/schema.go` file for testing purposes. For security compliance in production, this logic must be replaced with an environment-based secret or a secure first-time-setup workflow.
+
 
 ### Local Development
 
