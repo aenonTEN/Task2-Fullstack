@@ -151,7 +151,7 @@ export class RecruitmentComponent implements OnInit {
     }
     this.loading = false;
   }
-//check
+
   async createCandidate() {
     this.loading = true;
     try {
